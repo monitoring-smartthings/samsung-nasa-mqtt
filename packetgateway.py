@@ -43,6 +43,7 @@ class PacketGateway:
     self.gatewaysocket = None
     self.queue = queue.Queue()
     self.rxonly = rxonly
+    self.rx=b''
 
   def connect(self, host=None, port=None):
     with self.seriallock:
@@ -102,6 +103,7 @@ class PacketGateway:
             haslock=True
             self.seriallock.acquire()
             locktimeout=time.time()+LOCK_TIMEOUT_S
+            log.debug("acquire packet lock, packet is starting (maybe preamble)")
 
           #thanks python for that GREAT handling of TX that triggers select to return ready set.
           try:
@@ -178,6 +180,12 @@ class PacketGateway:
           self.seriallock.release()
           haslock = False
     log.info("exiting rx loop thread")
+
+  def mute(self):
+    self.rxonly = True
+
+  def unmute(self):
+    self.rxonly = False
 
   # Method to send a packet to the HW gateway
   def packet_tx(self, p, force=False):

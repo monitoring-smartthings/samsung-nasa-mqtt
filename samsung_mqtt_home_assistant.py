@@ -70,6 +70,7 @@ nasa_pnp_ended=False
 nasa_pnp_check_requested=False
 desynch=0
 nasa_update_timeout_checks = []
+workaround_e604 = True
 
 class NASAUpdateTimeoutCheck():
   def __init__ (self, updatecommand, _msgnum, expectedintvalue, timeout_s=0):
@@ -145,6 +146,8 @@ def nasa_reset_state():
     log.info("set default zone 1/2 current temperature to: " + str(args.nasa_default_zone_temp) )
     nasa_state[nasa_message_name(0x423A)] = args.nasa_default_zone_temp*10
     nasa_state[nasa_message_name(0x42DA)] = args.nasa_default_zone_temp*10
+  if workaround_e604:
+    pgw.mute()
 
 
 def nasa_raw_payload_mqtt_handler(client, userdata, msg):
@@ -443,10 +446,14 @@ def rx_nasa_handler(*nargs, **kwargs):
 
   nasa_log_packet(log, source, dest, packetType, payloadType, packetNumber, dataSets)
 
-
   # reply from a custom MQTT payload?
   if tools.bin2hex(dest) == args.nasa_addr and packetNumber == 240 and mqtt_client:
     mqtt_client.publish('homeassistant/text/samsung_ehs_raw_reply/state', tools.bin2hex(packet), retain=True)
+
+  # when indoor controller reboots, mute until sufficient boot state reached
+  if workaround_e604:
+    if packetType == "standby" or packetType == "gathering":
+      pgw.mute()
 
   # ignore non normal packets
   if packetType != "normal":
@@ -514,6 +521,16 @@ def rx_nasa_handler(*nargs, **kwargs):
         if nasa_pnp_ended and nasa_pnp_check_requested and desynch == 0:
           nasa_pnp_check_requested=False
 
+      if workaround_e604:
+        # the master notifies its boot state changed to finished
+        # or the master notifies it's regular update
+        # only 4052 when a remote controller exists and has done PNP
+        # 4000 is always notified when boot finished
+        if (ds[0] == 0x4052 and ds[4][0] == 5) or ds[0] == 0x4000:
+          # only unmute upon fully booted indoor controller when we're not globally muted
+          if not args.nasa_mute:
+            pgw.unmute()
+
       # hold the value indexed by its name, for easier update of mqtt stuff
       # (set the int raw value)
       nasa_state[ds[1]] = ds[4][0]
@@ -568,6 +585,8 @@ def rx_event_nasa(p):
 #todo: make that parametrized
 pgw = packetgateway.PacketGateway(args.serial_host, args.serial_port, rx_event=rx_event_nasa, rxonly= ( args.promiscious or args.nasa_mute ) )
 parser = packetgateway.NasaPacketParser()
+if workaround_e604:
+  pgw.mute()
 pgw.start()
 #ensure gateway is available and publish mqtt is possible when receving values
 time.sleep(2)
